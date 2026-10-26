@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Chicken Race</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Memuat Three.js untuk rendering 3D -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Share+Tech+Mono&family=Chewy&display=swap');
+        
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #0f172a; 
+            font-family: 'Nunito', sans-serif; 
+            user-select: none;
+        }
+        
+        #race-canvas { 
+            display: block; 
+            width: 100vw; 
+            height: 100vh; 
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+        }
+        
+        .ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .interactive { pointer-events: auto; }
+        
+        /* Glassmorphism */
+        .glass-panel { 
+            background: rgba(255, 255, 255, 0.95); 
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); 
+            border-radius: 24px; 
+            border: 2px solid rgba(255, 255, 255, 1); 
+        }
+
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .btn-start { animation: pulse-glow 2s infinite; }
+
+        /* Wadah Label Nama 3D */
+        #labels-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            pointer-events: none;
+            z-index: 5;
+            overflow: hidden;
+        }
+
+        .name-label {
+            position: absolute;
+            background: transparent;
+            color: #ffffff;
+            font-family: 'Chewy', cursive;
+            font-size: 44px; /* Huruf diperbesar secara signifikan */
+            letter-spacing: 2px;
+            -webkit-text-stroke: 2px #000000; /* Garis tepi hitam dipertebal */
+            text-shadow: 4px 4px 0px rgba(0,0,0,0.7);
+            text-transform: uppercase; /* Memaksa semua teks menjadi HURUF BESAR */
+            transform: translate(-50%, -100%);
+            transition: opacity 0.2s;
+            white-space: nowrap;
+        }
+        
+        .font-digital { font-family: 'Share Tech Mono', monospace; }
+    </style>
+</head>
+<body>
+
+    <!-- Canvas 3D -->
+    <canvas id="race-canvas"></canvas>
+    
+    <!-- Wadah Label Nama (Overlay HTML) -->
+    <div id="labels-container"></div>
+
+    <!-- UI Overlay -->
+    <div class="ui-layer flex flex-col justify-between">
+        <!-- Top Bar -->
+        <div id="top-bar-race" class="flex justify-between items-start p-4 transition-transform duration-500 -translate-y-full w-full">
+            <div class="flex items-center gap-2 interactive">
+                <button class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-xl border-b-4 border-red-700 shadow-md transition-transform active:translate-y-1 active:border-b-0" onclick="resetRace()">
+                    🛑 BERHENTI
+                </button>
+            </div>
+            
+            <!-- Tampilan Countdown Timer -->
+            <div id="race-timer" class="hidden interactive absolute top-4 left-1/2 transform -translate-x-1/2 bg-slate-900 bg-opacity-80 text-white font-digital text-6xl px-6 py-2 rounded-2xl border-4 border-slate-700 shadow-xl tracking-widest z-50">
+                00:00
+            </div>
+            
+            <div class="interactive flex gap-2">
+                <button onclick="toggleFullscreen()" class="bg-white hover:bg-gray-100 border-2 border-slate-300 text-slate-800 font-bold py-2 px-4 rounded-lg shadow-md transition-transform active:scale-95 text-sm">⛶ Fullscreen</button>
+            </div>
+        </div>
+
+        <!-- Panel Konfigurasi -->
+        <div class="flex-1 flex items-center justify-center pointer-events-none absolute inset-0 z-20">
+            <div id="config-panel" class="interactive glass-panel p-8 w-full max-w-md relative transform transition-all duration-500">
+                <div class="text-center mb-6">
+                    <h2 class="text-4xl font-black text-orange-500 drop-shadow-sm">🐔 3D CHICKEN RACE</h2>
+                    <p class="text-slate-600 font-bold mt-2">Masukkan nama jagoanmu! (Maks 20)</p>
+                </div>
+                
+                <!-- Pilihan Durasi Balapan -->
+                <div class="mb-4">
+                    <label class="block text-slate-700 font-bold mb-2">Durasi Balapan:</label>
+                    <select id="race-duration" class="w-full bg-white border-2 border-slate-200 rounded-xl p-3 text-slate-800 font-bold focus:outline-none focus:border-orange-500">
+                        <option value="30">30 Detik (Sprint)</option>
+                        <option value="60" selected>1 Menit (Normal)</option>
+                        <option value="120">2 Menit (Maraton)</option>
+                        <option value="300">5 Menit (Ketahanan)</option>
+                    </select>
+                </div>
+                
+                <div class="mb-6">
+                    <textarea id="manual-names" rows="6" class="w-full bg-slate-50 border-2 border-slate-200 rounded-xl p-4 text-slate-900 font-bold focus:outline-none focus:border-orange-500 transition-all resize-none shadow-inner text-lg uppercase" placeholder="Contoh:&#10;KATE&#10;JAGO&#10;CEMANI"></textarea>
+                </div>
+
+                <button onclick="prepareRace()" class="btn-start w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-4 px-6 rounded-xl border-b-4 border-orange-700 text-2xl transition-all active:translate-y-1 active:border-b-0 transform">
+                    🚀 MULAI BALAPAN!
+                </button>
+            </div>
+        </div>
+
+        <!-- Hitung Mundur -->
+        <div id="center-message" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-[12rem] font-black text-white drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)] hidden z-20" style="-webkit-text-stroke: 4px black;">
+            3
+        </div>
+
+        <!-- Modal Pemenang -->
+        <div id="winner-modal" class="interactive absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 glass-panel p-6 text-center hidden w-[450px] max-h-[90vh] flex-col border-4 border-yellow-400 z-30 bg-white shadow-2xl">
+            <div class="text-6xl mb-2 animate-bounce">👑</div>
+            <h2 class="text-xl font-bold text-slate-700 mb-1">Pemenangnya adalah</h2>
+            <div class="bg-orange-100 border-2 border-orange-300 rounded-xl py-3 mb-4 shadow-inner">
+                <p id="winner-name" class="text-4xl font-black text-orange-600 uppercase tracking-wide">NAMA</p>
+            </div>
+            
+            <!-- Tabel Klasemen yang bisa digulir -->
+            <div class="flex-1 overflow-y-auto mb-4 border-2 border-slate-200 rounded-xl bg-slate-100 p-2 max-h-[40vh]">
+                <table class="w-full text-left font-bold text-slate-700 border-separate border-spacing-y-1">
+                    <tbody id="leaderboard-table">
+                        <!-- Data klasemen akan diisi oleh JavaScript di sini -->
+                    </tbody>
+                </table>
+            </div>
+
+            <button onclick="resetRace()" class="w-full bg-green-500 hover:bg-green-600 text-white font-black py-4 px-6 rounded-xl border-b-4 border-green-700 transition-all active:translate-y-1 active:border-b-0 text-xl flex-shrink-0">🏁 BALAPAN LAGI</button>
+        </div>
+    </div>
+
+    <script>
+        /* --- AUDIO SYSTEM --- */
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+        function initAudio() {
+            if (!audioCtx) audioCtx = new AudioContext();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+        function playBeep(freq = 440, duration = 0.1, type = 'sine') {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type; osc.frequency.value = freq;
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        /* --- UI LOGIC --- */
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(e => console.log(e));
+            else document.exitFullscreen();
+        }
+
+        const configPanel = document.getElementById('config-panel');
+        const centerMessage = document.getElementById('center-message');
+        const winnerModal = document.getElementById('winner-modal');
+        const topBarRace = document.getElementById('top-bar-race');
+        const labelsContainer = document.getElementById('labels-container');
+
+        let gameState = 'CONFIG'; 
+        let participants = [];
+        let chickens = [];
+        let TRACK_LENGTH = 5000;
+        
+        // Variabel Timer & Langit
+        let raceDuration = 60;
+        let raceEndTime = 0;
+        let timerActive = false;
+        let lastBeepSec = -1;
+        let isTimeUp = false;
+        let skyGroup;
+        let dynamicFinishLine = null;
+        let finishedRankings = []; // Array untuk menampung urutan juara
+
+        /* --- THREE.JS 3D ENGINE --- */
+        let scene, camera, renderer;
+        let trackGroup;
+        
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            // MEMPERJAUH JARAK KABUT AGAR AWAN TERLIHAT
+            scene.fog = new THREE.Fog(0x87CEEB, 50, 500);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 15, 25);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('race-canvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // Pencahayaan
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambient);
+            
+            const dirLight = new THREE.DirectionalLight(0xfff5b6, 0.8);
+            dirLight.position.set(50, 100, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.bottom = -100;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            buildSky();
+            buildTrack();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function buildSky() {
+            skyGroup = new THREE.Group();
+            
+            // Matahari - Didekatkan agar tidak tertutup kabut
+            const sunGeo = new THREE.SphereGeometry(15, 32, 32);
+            const sunMat = new THREE.MeshBasicMaterial({ color: 0xffd700 });
+            const sun = new THREE.Mesh(sunGeo, sunMat);
+            sun.position.set(30, 50, -80);
+            skyGroup.add(sun);
+
+            // Awan - Didekatkan dan diubah menjadi MeshBasicMaterial agar warnanya putih bersih (tidak terpengaruh bayangan)
+            const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            for(let i = 0; i < 20; i++) {
+                const cloud = new THREE.Group();
+                const numPuffs = 3 + Math.floor(Math.random() * 4);
+                for(let j = 0; j < numPuffs; j++) {
+                    const puff = new THREE.Mesh(new THREE.SphereGeometry(4 + Math.random()*5, 4 + Math.random()*3, 4 + Math.random()*5), cloudMat);
+                    puff.position.set((Math.random()-0.5)*15, (Math.random()-0.5)*5, (Math.random()-0.5)*15);
+                    cloud.add(puff);
+                }
+                // Posisi awan diatur lebih dekat ke kamera
+                cloud.position.set((Math.random()-0.5)*300, 30 + Math.random()*20, -40 - Math.random()*150);
+                skyGroup.add(cloud);
+            }
+            scene.add(skyGroup);
+        }
+
+        function buildTrack() {
+            trackGroup = new THREE.Group();
+            
+            // Lantai Utama Diperpanjang (Tanpa batas akhir statis)
+            const floorGeo = new THREE.PlaneGeometry(42, 30000);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x8B5A2B, roughness: 1.0 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.z = -14500;
+            floor.receiveShadow = true;
+            trackGroup.add(floor);
+
+            // Padang Rumput Kiri dan Kanan
+            const grassGeo = new THREE.PlaneGeometry(200, 30000);
+            const grassMat = new THREE.MeshStandardMaterial({ color: 0x4CAF50, roughness: 0.9 });
+            const leftGrass = new THREE.Mesh(grassGeo, grassMat);
+            leftGrass.rotation.x = -Math.PI / 2;
+            leftGrass.position.set(-121, -0.1, floor.position.z);
+            leftGrass.receiveShadow = true;
+            const rightGrass = new THREE.Mesh(grassGeo, grassMat);
+            rightGrass.rotation.x = -Math.PI / 2;
+            rightGrass.position.set(121, -0.1, floor.position.z);
+            rightGrass.receiveShadow = true;
+            trackGroup.add(leftGrass, rightGrass);
+
+            // Pagar Kayu
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x5C4033 });
+            const fenceLength = 30000;
+            
+            const railGeo = new THREE.BoxGeometry(0.5, 0.2, fenceLength);
+            const lRail1 = new THREE.Mesh(railGeo, woodMat); lRail1.position.set(-21.5, 2, floor.position.z);
+            const lRail2 = new THREE.Mesh(railGeo, woodMat); lRail2.position.set(-21.5, 1, floor.position.z);
+            const rRail1 = new THREE.Mesh(railGeo, woodMat); rRail1.position.set(21.5, 2, floor.position.z);
+            const rRail2 = new THREE.Mesh(railGeo, woodMat); rRail2.position.set(21.5, 1, floor.position.z);
+            trackGroup.add(lRail1, lRail2, rRail1, rRail2);
+
+            const postGeo = new THREE.BoxGeometry(0.8, 3, 0.8);
+            for(let i = 100; i > -25000; i -= 20) {
+                const lPost = new THREE.Mesh(postGeo, woodMat); lPost.position.set(-21.5, 1.5, i);
+                const rPost = new THREE.Mesh(postGeo, woodMat); rPost.position.set(21.5, 1.5, i);
+                trackGroup.add(lPost, rPost);
+            }
+
+            // Garis Start
+            const startGeo = new THREE.PlaneGeometry(42, 2);
+            const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const startLine = new THREE.Mesh(startGeo, whiteMat);
+            startLine.rotation.x = -Math.PI / 2;
+            startLine.position.set(0, 0.02, 0);
+            trackGroup.add(startLine);
+            
+            // HAPUS GAPURA FINISH DARI SINI (Sekarang dinamis)
+
+            // --- ORNAMEN LINGKUNGAN ---
+            const treeTrunkGeo = new THREE.CylinderGeometry(1, 1.5, 6, 8);
+            const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x5C4033 });
+            const leavesGeo = new THREE.ConeGeometry(5, 12, 8);
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x2E8B57 });
+            
+            const bushGeo = new THREE.SphereGeometry(3, 8, 8);
+            const bushMat = new THREE.MeshStandardMaterial({ color: 0x3CB371 });
+            
+            const rockGeo = new THREE.DodecahedronGeometry(2);
+            const rockMat = new THREE.MeshStandardMaterial({ color: 0x808080 });
+            
+            const hayGeo = new THREE.CylinderGeometry(2, 2, 4, 8);
+            const hayMat = new THREE.MeshStandardMaterial({ color: 0xDAA520 });
+
+            // Menyebarkan ornamen di sepanjang pinggir lintasan
+            for (let z = 100; z > -TRACK_LENGTH - 200; z -= 30) {
+                // Ornamen Kiri
+                addScenery(-30 - Math.random() * 40, z + (Math.random() * 20 - 10));
+                // Ornamen Kanan
+                addScenery(30 + Math.random() * 40, z + (Math.random() * 20 - 10));
+            }
+
+            function addScenery(x, z) {
+                const rand = Math.random();
+                if (rand < 0.3) {
+                    // Pohon
+                    const trunk = new THREE.Mesh(treeTrunkGeo, treeTrunkMat);
+                    trunk.position.set(x, 3, z);
+                    const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+                    leaves.position.set(x, 10, z);
+                    trunk.castShadow = true; leaves.castShadow = true;
+                    trackGroup.add(trunk, leaves);
+                } else if (rand < 0.5) {
+                    // Semak
+                    const bush = new THREE.Mesh(bushGeo, bushMat);
+                    bush.position.set(x, 1.5, z);
+                    bush.scale.set(1, 0.7 + Math.random()*0.5, 1);
+                    bush.castShadow = true;
+                    trackGroup.add(bush);
+                } else if (rand < 0.7) {
+                    // Batu
+                    const rock = new THREE.Mesh(rockGeo, rockMat);
+                    rock.position.set(x, 0.5, z);
+                    rock.rotation.set(Math.random(), Math.random(), 0);
+                    rock.scale.set(1 + Math.random(), 0.5 + Math.random()*0.5, 1 + Math.random());
+                    rock.castShadow = true;
+                    trackGroup.add(rock);
+                } else if (rand < 0.85) {
+                    // Tumpukan Jerami
+                    const hay = new THREE.Mesh(hayGeo, hayMat);
+                    hay.position.set(x, 2, z);
+                    hay.rotation.x = Math.PI / 2;
+                    hay.rotation.z = Math.random() * Math.PI;
+                    hay.castShadow = true;
+                    trackGroup.add(hay);
+                }
+            }
+
+            scene.add(trackGroup);
+        }
+        
+        // Memunculkan Garis Finish Otomatis saat waktu habis
+        function spawnFinishLine(zPos) {
+            if (dynamicFinishLine) scene.remove(dynamicFinishLine);
+            dynamicFinishLine = new THREE.Group();
+            
+            const startGeo = new THREE.PlaneGeometry(42, 2);
+            const finishLine = new THREE.Mesh(startGeo, new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+            finishLine.rotation.x = -Math.PI / 2;
+            finishLine.position.set(0, 0.02, 0);
+            
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x5C4033 });
+            
+            // Ditinggikan menjadi 35 agar kamera bisa melihat bebas dari bawah kolong gapura
+            const gateHeight = 35; 
+            
+            const arch = new THREE.Mesh(new THREE.BoxGeometry(45, 2, 2), woodMat);
+            arch.position.set(0, gateHeight, 0);
+            
+            const p1 = new THREE.Mesh(new THREE.BoxGeometry(2, gateHeight, 2), woodMat); 
+            p1.position.set(-21.5, gateHeight / 2, 0);
+            
+            const p2 = new THREE.Mesh(new THREE.BoxGeometry(2, gateHeight, 2), woodMat); 
+            p2.position.set(21.5, gateHeight / 2, 0);
+            
+            // Papan baner diperbesar sedikit agar terlihat proporsional dengan tingginya
+            const board = new THREE.Mesh(new THREE.BoxGeometry(24, 6, 2.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            board.position.set(0, gateHeight, 0);
+
+            dynamicFinishLine.add(finishLine, arch, p1, p2, board);
+            dynamicFinishLine.position.set(0, 0, zPos);
+            scene.add(dynamicFinishLine);
+        }
+
+        // --- PEMBUATAN MODEL AYAM 3D ---
+        const chickenColors = [0xffffff, 0xfcd34d, 0xf97316, 0x78350f, 0x1e293b, 0x38bdf8];
+        
+        class Chicken3D {
+            constructor(name, index, total) {
+                this.name = name;
+                this.index = index;
+                this.color = chickenColors[index % chickenColors.length];
+                
+                this.group = new THREE.Group();
+                
+                // Lebar lintasan dari x: -20 sampai x: 20
+                const xPos = -20 + (Math.random() * 40);
+                const zPos = 5 + (Math.random() * 10); // Berdesakan di garis start
+                
+                this.group.position.set(xPos, 0, zPos);
+                
+                // --- PERBAIKAN: Putar ayam 180 derajat agar menghadap ke depan lintasan ---
+                this.group.rotation.y = Math.PI; 
+                
+                this.buildModel();
+                scene.add(this.group);
+
+                // Elemen HTML Label
+                this.label = document.createElement('div');
+                this.label.className = 'name-label';
+                this.label.textContent = name;
+                labelsContainer.appendChild(this.label);
+
+                // Variabel Balapan
+                this.speed = 0;
+                this.baseSpeed = 0.8;
+                this.burstSpeed = 0;
+                this.burstTimer = 0;
+                this.finished = false;
+                this.isWinner = false;
+                
+                this.animOffset = Math.random() * Math.PI * 2;
+            }
+
+            buildModel() {
+                // Skala 1 unit = 1 meter
+                // 1. Badan (Bulat Chubby)
+                const bodyGeo = new THREE.SphereGeometry(1.5, 16, 16);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.9 });
+                this.body = new THREE.Mesh(bodyGeo, bodyMat);
+                this.body.scale.set(1, 1.2, 1.2); // Gemuk ke bawah dan memanjang dikit
+                this.body.position.y = 2.5;
+                this.body.castShadow = true;
+                this.group.add(this.body);
+
+                // 2. Mata Kanan & Kiri
+                const eyeGeo = new THREE.SphereGeometry(0.35, 16, 16);
+                const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const pupilGeo = new THREE.SphereGeometry(0.15, 16, 16);
+                const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+                const addEye = (x) => {
+                    const eye = new THREE.Mesh(eyeGeo, eyeMat);
+                    eye.position.set(x, 3.2, 1.2);
+                    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+                    pupil.position.set(0, 0, 0.25);
+                    eye.add(pupil);
+                    this.group.add(eye);
+                };
+                addEye(0.6); // Kanan
+                addEye(-0.6); // Kiri
+
+                // 3. Paruh Terbuka (Ngos-ngosan)
+                const beakGeo = new THREE.ConeGeometry(0.3, 0.8, 4); // Piramida
+                const beakMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b });
+                
+                const topBeak = new THREE.Mesh(beakGeo, beakMat);
+                topBeak.position.set(0, 2.7, 1.8);
+                topBeak.rotation.x = Math.PI / 2 - 0.2;
+                this.group.add(topBeak);
+
+                const botBeak = new THREE.Mesh(beakGeo, beakMat);
+                botBeak.position.set(0, 2.3, 1.7);
+                botBeak.rotation.x = Math.PI / 2 + 0.3; // Membuka ke bawah
+                this.group.add(botBeak);
+
+                // Dalaman mulut gelap
+                const mouthGeo = new THREE.SphereGeometry(0.2, 8, 8);
+                const mouthMat = new THREE.MeshBasicMaterial({ color: 0x450a0a });
+                const mouth = new THREE.Mesh(mouthGeo, mouthMat);
+                mouth.position.set(0, 2.5, 1.6);
+                this.group.add(mouth);
+
+                // 4. Jengger (3 Lapis Besar)
+                const combMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+                const addComb = (y, z, scale) => {
+                    const c = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), combMat);
+                    c.position.set(0, y, z);
+                    c.scale.set(0.6, scale, 1);
+                    this.group.add(c);
+                };
+                addComb(4.2, 0.5, 1.5);
+                addComb(4.4, 0, 1.8);
+                addComb(4.1, -0.5, 1.2);
+
+                // 5. Sayap Kanan Kiri
+                const wingGeo = new THREE.SphereGeometry(0.8, 16, 16);
+                const wingMat = new THREE.MeshStandardMaterial({ color: this.color === 0xffffff ? 0xf1f5f9 : this.color });
+                this.wingR = new THREE.Mesh(wingGeo, wingMat);
+                this.wingR.scale.set(0.3, 1, 1.5);
+                this.wingR.position.set(1.5, 2.2, 0);
+                this.group.add(this.wingR);
+
+                this.wingL = new THREE.Mesh(wingGeo, wingMat);
+                this.wingL.scale.set(0.3, 1, 1.5);
+                this.wingL.position.set(-1.5, 2.2, 0);
+                this.group.add(this.wingL);
+
+                // 6. Kaki
+                const legGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.2, 8);
+                const footGeo = new THREE.BoxGeometry(0.6, 0.2, 0.8);
+                const legMat = new THREE.MeshStandardMaterial({ color: 0xf97316 });
+
+                const createLeg = (x) => {
+                    const legPivot = new THREE.Group();
+                    legPivot.position.set(x, 1.2, 0); // Titik poros (Pinggul)
+                    
+                    const legBone = new THREE.Mesh(legGeo, legMat);
+                    legBone.position.y = -0.6; // Turunkan tulang dari poros
+                    
+                    const foot = new THREE.Mesh(footGeo, legMat);
+                    foot.position.set(0, -1.1, 0.2); // Telapak di ujung tulang
+                    
+                    legPivot.add(legBone);
+                    legPivot.add(foot);
+                    this.group.add(legPivot);
+                    return legPivot;
+                };
+                
+                this.legR = createLeg(0.6);
+                this.legL = createLeg(-0.6);
+            }
+
+            update(time) {
+                if (gameState === 'RACING' || gameState === 'FINISHING') {
+                    if (!this.finished) {
+                        // Logika Kecepatan Acak dengan "Rubber-Banding" SUPER KETAT agar tidak keluar layar
+                        if (this.burstTimer <= 0) {
+                            let leaderZ = Math.min(...chickens.map(c => c.group.position.z));
+                            let distBehind = this.group.position.z - leaderZ; 
+                            
+                            let sprintChance = 0.02 + (distBehind > 10 ? 0.05 : 0) + (distBehind > 15 ? 0.5 : 0);
+                            let stumbleChance = 0.01 + (distBehind < 3 ? 0.05 : 0);
+
+                            if (distBehind > 22) {
+                                // Tarikan darurat (Karet Gelang maksimal) agar ayam belakang tidak hilang
+                                this.burstSpeed = 1.8;
+                                this.burstTimer = 30;
+                            } else if (Math.random() < sprintChance) {
+                                this.burstSpeed = Math.random() * 1.2 + 0.5;
+                                this.burstTimer = Math.floor(Math.random() * 40) + 20; 
+                            } else if (Math.random() < stumbleChance) {
+                                this.burstSpeed = -0.3;
+                                this.burstTimer = 15;
+                            }
+                        } else {
+                            this.burstTimer--;
+                            this.burstSpeed *= 0.90; // Tarikan napas/pemulihan kecepatan lebih natural
+                        }
+
+                        this.speed = this.baseSpeed + this.burstSpeed;
+                        if(this.speed < 0.2) this.speed = 0.2; 
+                        
+                        // Lari maju (Negative Z)
+                        this.group.position.z -= this.speed; 
+                        
+                        // Agar tidak keluar jalur (X axis)
+                        this.group.position.x += Math.sin(time * 0.01 + this.animOffset) * 0.1;
+                        if(this.group.position.x > 22) this.group.position.x = 22;
+                        if(this.group.position.x < -22) this.group.position.x = -22;
+
+                    } else {
+                        // Rem perlahan saat finish
+                        this.speed *= 0.95;
+                        this.group.position.z -= this.speed;
+                    }
+
+                    // --- ANIMASI LARI ---
+                    const runCycle = time * 0.02 + this.animOffset;
+                    const isRunning = this.speed > 0.1;
+                    
+                    if (isRunning) {
+                        // Badan loncat kecil (Bobbing)
+                        this.body.position.y = 2.5 + Math.abs(Math.sin(runCycle)) * 0.3;
+                        // Kaki mengayuh
+                        this.legR.rotation.x = Math.sin(runCycle) * 0.8;
+                        this.legL.rotation.x = Math.sin(runCycle + Math.PI) * 0.8;
+                        // Sayap mengepak
+                        this.wingR.rotation.z = Math.abs(Math.sin(runCycle * 1.5)) * 0.5;
+                        this.wingL.rotation.z = -Math.abs(Math.sin(runCycle * 1.5)) * 0.5;
+                    } else {
+                        this.legR.rotation.x = 0; this.legL.rotation.x = 0;
+                        this.wingR.rotation.z = 0; this.wingL.rotation.z = 0;
+                    }
+
+                } else if (gameState === 'COUNTDOWN') {
+                    // Cemas di garis start
+                    this.group.position.z += (Math.random() - 0.5) * 0.1;
+                    this.group.position.x += (Math.random() - 0.5) * 0.1;
+                } else if (gameState === 'FINISHED' && this.isWinner) {
+                    // Loncat kegirangan!
+                    this.group.position.y = Math.abs(Math.sin(time * 0.01)) * 3;
+                    this.wingR.rotation.z = Math.abs(Math.sin(time * 0.02)) * 1;
+                    this.wingL.rotation.z = -Math.abs(Math.sin(time * 0.02)) * 1;
+                }
+
+                // --- SINKRONISASI LABEL HTML ---
+                const vector = new THREE.Vector3();
+                // Ambil titik di atas kepala ayam
+                vector.setFromMatrixPosition(this.body.matrixWorld);
+                vector.y += 2.5; 
+                
+                // Proyeksi ke kamera 2D
+                vector.project(camera);
+                
+                // Cek apakah ada di depan kamera
+                if (vector.z < 1) {
+                    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
+                    this.label.style.left = `${x}px`;
+                    this.label.style.top = `${y}px`;
+                    this.label.style.display = 'block';
+                    
+                    // Skala teks mengecil jika menjauh
+                    const scale = Math.max(0.5, 1 - (vector.z * 0.5));
+                    this.label.style.transform = `translate(-50%, -100%) scale(${scale})`;
+                } else {
+                    this.label.style.display = 'none';
+                }
+            }
+
+            destroy() {
+                scene.remove(this.group);
+                if (this.label.parentNode) this.label.parentNode.removeChild(this.label);
+            }
+        }
+
+        /* --- GAME LOOP --- */
+        function animate(time) {
+            requestAnimationFrame(animate);
+            
+            // Update Timer Presisi Tinggi (1/100 detik)
+            if (timerActive && gameState === 'RACING') {
+                let timeLeft = raceEndTime - performance.now();
+                if (timeLeft <= 0) {
+                    timeLeft = 0;
+                    timerActive = false;
+                    isTimeUp = true;
+                    
+                    let leaderZ = Math.min(...chickens.map(c => c.group.position.z));
+                    TRACK_LENGTH = Math.abs(leaderZ) + 80; 
+                    spawnFinishLine(-TRACK_LENGTH);
+                }
+
+                // Format MM:SS:ms (Seperseratus detik)
+                const m = Math.floor(timeLeft / 60000).toString().padStart(2, '0');
+                const s = Math.floor((timeLeft % 60000) / 1000).toString().padStart(2, '0');
+                const ms = Math.floor((timeLeft % 1000) / 10).toString().padStart(2, '0');
+                document.getElementById('race-timer').textContent = `${m}:${s}:${ms}`;
+
+                if (timeLeft <= 5000 && timeLeft > 0) {
+                    document.getElementById('race-timer').style.color = '#ef4444';
+                    let sec = Math.ceil(timeLeft / 1000);
+                    if (sec !== lastBeepSec) {
+                        playBeep(440, 0.1); 
+                        lastBeepSec = sec;
+                    }
+                }
+            }
+
+            if (gameState !== 'CONFIG') {
+                let leader = chickens[0];
+                let lastChicken = chickens[0]; // Lacak ayam paling belakang
+                let raceWinner = null;
+
+                chickens.forEach(chicken => {
+                    chicken.update(time);
+                    if (chicken.group.position.z < leader.group.position.z) leader = chicken;
+                    if (chicken.group.position.z > lastChicken.group.position.z) lastChicken = chicken;
+
+                    // Cek Finish HANYA JIKA WAKTU HABIS
+                    if (isTimeUp && (gameState === 'RACING' || gameState === 'FINISHING') && chicken.group.position.z <= -TRACK_LENGTH && !chicken.finished) {
+                        chicken.finished = true;
+                        finishedRankings.push(chicken); // Masukkan ke daftar peringkat
+                        if (!raceWinner && gameState === 'RACING') {
+                            raceWinner = chicken;
+                        }
+                    }
+                });
+
+                // Pergerakan Kamera Dinamis (Mencakup semua ayam di layar)
+                const spread = lastChicken.group.position.z - leader.group.position.z;
+                const midZ = (leader.group.position.z + lastChicken.group.position.z) / 2;
+                
+                // Kamera menyesuaikan jarak dan ketinggian berdasarkan ayam paling belakang
+                const isMobile = window.innerWidth < 768;
+                const zoomOut = isMobile ? 35 : 20; // Mundur lebih jauh jika di HP
+
+                const targetCamZ = lastChicken.group.position.z + zoomOut + (spread * 0.3);
+                const targetCamY = (isMobile ? 25 : 15) + (spread * 0.2); 
+                const targetCamX = 0; // Kunci kamera di tengah (0) agar ayam di pinggir tidak hilang
+
+                camera.position.z += (targetCamZ - camera.position.z) * 0.1;
+                camera.position.x += (targetCamX - camera.position.x) * 0.1;
+                camera.position.y += (targetCamY - camera.position.y) * 0.1;
+                
+                // Fokus kamera ke tengah-tengah kerumunan
+                camera.lookAt(0, 3, midZ - 15);
+
+                // Langit ikut bergerak dengan kamera
+                if (skyGroup) {
+                    skyGroup.position.z = camera.position.z - 50;
+                }
+
+                // Proses Pemenang
+                if (raceWinner && gameState === 'RACING') {
+                    gameState = 'FINISHING';
+                    raceWinner.isWinner = true;
+                    
+                    // Tunggu sebentar agar ayam lain bisa melewati garis finish
+                    setTimeout(() => {
+                        gameState = 'FINISHED';
+                        
+                        // Urutkan sisa ayam yang belum melewati garis finish berdasarkan jarak terjauh (Z terkecil)
+                        let remainingChickens = chickens.filter(c => !c.finished).sort((a, b) => a.group.position.z - b.group.position.z);
+                        finishedRankings = finishedRankings.concat(remainingChickens);
+                        
+                        showWinner(raceWinner.name, finishedRankings);
+                    }, 3500); 
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+
+        /* --- GAME FLOW --- */
+        function prepareRace() {
+            initAudio();
+            
+            // Ambil durasi
+            const durationSelect = document.getElementById('race-duration');
+            raceDuration = parseInt(durationSelect.value);
+            
+            const text = document.getElementById('manual-names').value;
+            participants = text.split('\n').map(n => n.trim()).filter(n => n !== "");
+
+            if (participants.length < 2) {
+                alert("Butuh minimal 2 peserta untuk balapan!");
+                return;
+            }
+            if (participants.length > 20) participants = participants.slice(0, 20);
+
+            // Bersihkan ayam lama
+            chickens.forEach(c => c.destroy());
+            chickens = [];
+
+            // Buat Ayam Baru
+            chickens = participants.map((name, index) => new Chicken3D(name, index, participants.length));
+
+            // Reset Kamera ke Start
+            camera.position.set(0, 15, 25);
+            camera.lookAt(0,0,0);
+
+            // Sembunyikan UI
+            configPanel.style.transform = 'scale(0.8)';
+            configPanel.style.opacity = '0';
+            setTimeout(() => configPanel.classList.add('hidden'), 500);
+            topBarRace.classList.remove('-translate-y-full');
+            
+            finishedRankings = []; // Reset peringkat
+            gameState = 'COUNTDOWN';
+            startCountdown();
+        }
+
+        // TIMER BALAPAN
+        function startTimer() {
+            const timerUI = document.getElementById('race-timer');
+            timerUI.classList.remove('hidden');
+            timerUI.style.color = '#ffffff';
+            
+            // Timer presisi tinggi menggunakan performance.now()
+            raceEndTime = performance.now() + (raceDuration * 1000);
+            isTimeUp = false;
+            timerActive = true;
+            lastBeepSec = -1;
+            
+            if(dynamicFinishLine) {
+                scene.remove(dynamicFinishLine);
+                dynamicFinishLine = null;
+            }
+        }
+
+        function startCountdown() {
+            centerMessage.classList.remove('hidden');
+            let count = 3;
+            
+            function tick() {
+                if (count > 0) {
+                    centerMessage.textContent = count;
+                    centerMessage.style.transform = 'translate(-50%, -50%) scale(1.5)';
+                    setTimeout(() => centerMessage.style.transform = 'translate(-50%, -50%) scale(1)', 50);
+                    playBeep(440, 0.1, 'sine');
+                    count--;
+                    setTimeout(tick, 1000);
+                } else {
+                    centerMessage.textContent = "GO!";
+                    centerMessage.style.color = '#f97316'; 
+                    playBeep(880, 0.4, 'triangle');
+                    setTimeout(() => {
+                        centerMessage.classList.add('hidden');
+                        centerMessage.style.color = 'white';
+                        gameState = 'RACING';
+                        startTimer(); // Mulai timer saat balapan berjalan
+                    }, 1000);
+                }
+            }
+            tick();
+        }
+
+        function showWinner(name, rankings) {
+            document.getElementById('winner-name').textContent = name;
+            
+            // Isi Papan Klasemen (Tabel HTML)
+            const tbody = document.getElementById('leaderboard-table');
+            tbody.innerHTML = '';
+            rankings.forEach((chicken, index) => {
+                const tr = document.createElement('tr');
+                // Beri warna khusus untuk Juara 1
+                tr.className = index === 0 ? 'bg-yellow-200 text-xl' : (index % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                
+                const tdRank = document.createElement('td');
+                tdRank.className = 'py-2 px-3 border-b text-center w-12 rounded-l-lg';
+                tdRank.textContent = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`;
+                
+                const tdName = document.createElement('td');
+                tdName.className = 'py-2 px-3 border-b rounded-r-lg uppercase';
+                tdName.textContent = chicken.name;
+                
+                tr.appendChild(tdRank);
+                tr.appendChild(tdName);
+                tbody.appendChild(tr);
+            });
+
+            winnerModal.classList.remove('hidden');
+            
+            // Nada Kemenangan
+            playBeep(523.25, 0.1); 
+            setTimeout(() => playBeep(659.25, 0.1), 150); 
+            setTimeout(() => playBeep(783.99, 0.1), 300); 
+            setTimeout(() => playBeep(1046.50, 0.5, 'square'), 450); 
+            
+            // Ledakan Confetti
+            createConfetti();
+        }
+        
+        function createConfetti() {
+            for(let i = 0; i < 150; i++) {
+                let conf = document.createElement('div');
+                conf.className = 'confetti-piece';
+                conf.style.position = 'fixed';
+                conf.style.left = Math.random() * 100 + 'vw';
+                conf.style.top = -20 + 'px';
+                conf.style.width = (Math.random() * 8 + 6) + 'px';
+                conf.style.height = (Math.random() * 12 + 8) + 'px';
+                conf.style.backgroundColor = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#ec4899'][Math.floor(Math.random()*6)];
+                conf.style.zIndex = '9999';
+                conf.style.pointerEvents = 'none';
+                conf.style.transform = `rotate(${Math.random()*360}deg)`;
+                document.body.appendChild(conf);
+                
+                let fallDuration = Math.random() * 3 + 2;
+                conf.animate([
+                    { transform: `translate3d(0,0,0) rotate(0deg)`, opacity: 1 },
+                    { transform: `translate3d(${Math.random()*300 - 150}px, 100vh, 0) rotate(${Math.random()*1080}deg)`, opacity: 0 }
+                ], { duration: fallDuration * 1000, easing: 'cubic-bezier(.37,0,.63,1)' });
+                
+                setTimeout(() => conf.remove(), fallDuration * 1000);
+            }
+        }
+
+        function resetRace() {
+            winnerModal.classList.add('hidden');
+            topBarRace.classList.add('-translate-y-full');
+            
+            document.getElementById('race-timer').classList.add('hidden');
+            timerActive = false;
+            
+            configPanel.classList.remove('hidden');
+            setTimeout(() => {
+                configPanel.style.transform = 'scale(1)';
+                configPanel.style.opacity = '1';
+            }, 50);
+
+            gameState = 'CONFIG';
+            chickens.forEach(c => c.destroy());
+            chickens = [];
+            
+            // Reset kamera ke awal
+            camera.position.set(0, 15, 25);
+            camera.lookAt(0,0,0);
+        }
+
+        // Mulai aplikasi
+        window.onload = function() {
+            init3D();
+            animate(0);
+        };
+    </script>
+</body>
+</html>
